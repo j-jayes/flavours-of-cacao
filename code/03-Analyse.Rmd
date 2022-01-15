@@ -8,6 +8,8 @@ output: html_document
 ```{r}
 library(tidyverse)
 
+theme_set(theme_light())
+
 df <- read_rds(here::here("data", "chocolate-bar-ratings-tidy.rds"))
 ```
 
@@ -74,6 +76,58 @@ df %>%
   
 ```
 
+Cocoa percentage and score?
+
+```{r}
+df %>% 
+  count(cocoa_percent, sort = T)
+
+df %>% 
+  ggplot(aes(cocoa_percent)) +
+  geom_histogram(bins = 25)
+```
+
+70 percent is the most common
+
+What about ingredients??
+
+```{r}
+
+df %>% 
+  mutate(cocoa_percent = round(cocoa_percent, 1)) %>% 
+  count(cocoa_percent, n_ingredients) %>% 
+  ggplot(aes(cocoa_percent, n_ingredients, fill = n)) +
+  geom_tile() +
+  scale_fill_viridis_c() +
+  scale_x_continuous(labels = scales::percent_format()) +
+  labs(x = "Cocoa percent",
+       y = "Number of ingredients",
+       fill = "Number of bars reviewed") +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_colorbar(title.position = "bottom",
+                               barwidth = 25,
+                               title.hjust = .5))
+```
+
+Instead of 
+
+```{r}
+df %>% 
+  mutate(cocoa_percent = round(cocoa_percent, 1)) %>% 
+  ggplot(aes(cocoa_percent, n_ingredients, fill = rating)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "A") +
+  scale_x_continuous(labels = scales::percent_format()) +
+  labs(x = "Cocoa percent",
+       y = "Number of ingredients",
+       fill = "Chocolate bar rating") +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_colorbar(title.position = "bottom",
+                               barwidth = 25,
+                               title.hjust = .5))
+
+```
+
 
 ## Correlation between ingredients
 
@@ -82,16 +136,29 @@ library(corrr)
 
 df %>%
   select(starts_with("ing_1")) %>%
+  rename_with(.cols = everything(), ~ str_remove(.x, "ing_1_")) %>%
   correlate() %>%
   rearrange() %>%
   shave() %>%
-  rplot(shape = 15, colours = c("darkorange", "white", "darkcyan")) 
+  rplot(shape = 15, colours = c("midnightblue", "white", "darkorange")) 
 
 df %>%
   select(starts_with("ing_1")) %>%
   rename_with(.cols = everything(), ~ str_remove(.x, "ing_1_")) %>% 
   correlate() %>% 
   network_plot()
+```
+
+TBC
+
+```{r}
+df %>%
+  select(starts_with("ing_1")) %>%
+  rename_with(.cols = everything(), ~ str_remove(.x, "ing_1_")) %>%
+  correlate() %>%
+  rearrange() %>%
+  shave() %>%
+  gt::gt()
 ```
 
 

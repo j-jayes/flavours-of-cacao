@@ -5,3 +5,17 @@ date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: html_document
 ---
 
+```{r}
+library(tidyverse)
+```
+
+
+```{r}
+df <- readxl::read_excel(here::here("data", "chocolate-bar-ratings.xlsx"))
+
+df <- df %>% 
+  janitor::clean_names()
+
+# df %>% write_rds(here::here("data", "chocolate-bar-ratings.rds"))
+```
+

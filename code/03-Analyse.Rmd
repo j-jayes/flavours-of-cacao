@@ -4,3 +4,190 @@ author: "JJayes"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: html_document
 ---
+
+```{r}
+library(tidyverse)
+
+df <- read_rds(here::here("data", "chocolate-bar-ratings-tidy.rds"))
+```
+
+## Basic descrptives
+
+What are the scores?
+
+```{r}
+df %>% 
+  count(rating, sort = T)
+
+df %>% 
+  ggplot(aes(rating)) +
+  geom_histogram(bins = 12)
+```
+
+Have they been increasing over time?
+
+```{r}
+df %>%
+  ggplot(aes(review_date, rating, group = review_date)) +
+  geom_jitter(alpha = .2) +
+  geom_boxplot(varwidth = TRUE)
+```
+
+It looks like that while the average score has risen until 2010, there are consistently fewer low scoring bars.
+
+```{r}
+df %>%
+  ggplot(aes(review_date, rating, group = review_date)) +
+  geom_violin(aes(fill = review_date)) +
+  geom_boxplot(width = .2) +
+  scale_fill_viridis_c()
+```
+
+What about the different countries??
+
+```{r}
+df %>% 
+  count(country_of_bean_origin, sort = T)
+
+df %>% 
+  add_count(country_of_bean_origin) %>% 
+  filter(n > 60) %>% 
+  group_by(country_of_bean_origin) %>% 
+  summarise(mean_rating = mean(rating)) %>% 
+  mutate(country_of_bean_origin = fct_reorder(country_of_bean_origin, mean_rating)) %>% 
+  ggplot(aes(mean_rating, country_of_bean_origin)) +
+  geom_col() +
+  coord_cartesian(xlim = c(3,3.3))
+```
+
+
+```{r}
+library(ggbeeswarm)
+
+df %>% 
+  add_count(country_of_bean_origin) %>% 
+  filter(n > 60) %>% 
+  group_by(country_of_bean_origin) %>% 
+  mutate(country_of_bean_origin = fct_reorder(country_of_bean_origin, rating, .fun = mean)) %>% 
+  ggplot(aes(rating, country_of_bean_origin)) +
+  geom_quasirandom()
+  
+```
+
+
+## Correlation between ingredients
+
+```{r}
+library(corrr)
+
+df %>%
+  select(starts_with("ing_1")) %>%
+  correlate() %>%
+  rearrange() %>%
+  shave() %>%
+  rplot(shape = 15, colours = c("darkorange", "white", "darkcyan")) 
+
+df %>%
+  select(starts_with("ing_1")) %>%
+  rename_with(.cols = everything(), ~ str_remove(.x, "ing_1_")) %>% 
+  correlate() %>% 
+  network_plot()
+```
+
+
+## Word model
+
+```{r}
+df_characteristics <- df %>% 
+  select(c(most_memorable_characteristics, rating)) %>% 
+  separate_rows(most_memorable_characteristics, sep = ",") %>% 
+  mutate(most_memorable_characteristics = str_squish(most_memorable_characteristics))
+```
+
+```{r}
+df_characteristics %>% 
+  count(most_memorable_characteristics, sort = T)
+```
+
+We can start with a naive analysis that looks only at average score per word
+
+```{r}
+df_characteristics %>% 
+  group_by(most_memorable_characteristics) %>% 
+  add_count() %>% 
+  mutate(avg_rating = mean(rating)) %>% 
+  ungroup() %>% 
+  slice_max(avg_rating, n = 12, with_ties = F)
+
+df_characteristics %>% 
+  group_by(most_memorable_characteristics) %>% 
+  add_count() %>% 
+  filter(n > 3) %>% 
+  mutate(avg_rating = mean(rating)) %>% 
+  ungroup() %>% 
+  distinct(most_memorable_characteristics, avg_rating) %>% 
+  slice_max(avg_rating, n = 12, with_ties = F)
+```
+
+
+```{r}
+library(tidymodels)
+library(textrecipes)
+
+df_characteristics_folds <- vfold_cv(df_characteristics)
+
+glmnet_recipe <- 
+  recipe(formula = rating ~ ., data = df_characteristics) %>% 
+  step_tokenize(most_memorable_characteristics) %>% 
+  step_tokenfilter(most_memorable_characteristics, max_tokens = 100) %>% 
+  step_tf(most_memorable_characteristics) %>% 
+  step_normalize(all_predictors(), -all_nominal()) 
+
+glmnet_spec <- 
+  linear_reg(penalty = tune(), mixture = 1) %>% 
+  set_mode("regression") %>% 
+  set_engine("glmnet") 
+
+glmnet_workflow <- 
+  workflow() %>% 
+  add_recipe(glmnet_recipe) %>% 
+  add_model(glmnet_spec) 
+
+glmnet_grid <- tidyr::crossing(penalty = 10^seq(-6, -1, length.out = 20)) 
+
+glmnet_tune <- 
+  tune_grid(glmnet_workflow, df_characteristics_folds, grid = glmnet_grid)
+
+glmnet_tune %>% 
+  autoplot()
+
+glmnet_model_final <- finalize_workflow(glmnet_workflow, glmnet_tune %>% 
+  select_best())
+
+final_fit <- glmnet_model_final %>% 
+  fit(df_characteristics)
+```
+
+
+What does the fit look like?
+
+```{r}
+final_fit %>%
+  extract_fit_parsnip() %>%
+  tidy() %>%
+  filter(term != "(Intercept)") %>%
+  mutate(term = str_remove(term, "tf_most_memorable_characteristics_")) %>%
+  mutate(sign = estimate > 0) %>%
+  group_by(sign) %>%
+  slice_max(estimate, n = 12) %>%
+  ungroup() %>%
+  filter(estimate != 0) %>%
+  mutate(term = fct_reorder(term, estimate)) %>%
+  ggplot(aes(estimate, term, fill = sign)) +
+  geom_col(show.legend = F) +
+  geom_vline(xintercept = 0, lty = 2) +
+  scale_fill_brewer(palette = "Paired") +
+  labs(x = "Effect of word on chocolate bar score",
+       y = "Memorable characteristic")
+```
+

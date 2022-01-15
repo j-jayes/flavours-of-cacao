@@ -9,3 +9,114 @@ output: html_document
 library(tidyverse)
 ```
 
+
+```{r}
+df <- read_rds(here::here("data", "chocolate-bar-ratings.rds"))
+```
+
+### What does our data look like?
+
+```{r}
+df %>% skimr::skim()
+```
+
+Some things that we might want to do to make the analysis easier
+
+- Locations into a standard format
+- Change the ingredients from a character vector into a number and some some dummy variables
+
+### Locations
+
+```{r}
+library(countrycode)
+
+df <- df %>% 
+  mutate(company_location_code = countrycode(company_location, "country.name", "iso3c"))
+
+df <- df %>% 
+  mutate(country_of_bean_origin_code = countrycode(country_of_bean_origin, "country.name", "iso3c"))
+```
+
+We are given warnings about Amsterdam, Scotland and Wales. We can use a `case_when` statement if we want. I'll come back to this.
+
+### Ingredients
+
+```{r}
+df <- df %>% 
+  separate(ingredients, c("n_ingredients", "ingredients"), "-") %>% 
+  mutate(n_ingredients = parse_number(n_ingredients),
+         ingredients = str_squish(ingredients))
+
+df %>% 
+  count(n_ingredients)
+```
+
+Most bars have 3 ingredients. What are they?
+
+```{r}
+df %>% 
+  count(ingredients, sort = T)
+```
+
+What do these things mean? We will have to look back at the website!
+
+B = Beans, S = Sugar, S* = Sweetener other than white cane or beet sugar, C = Cocoa Butter, V = Vanilla, L = Lecithin, Sa = Salt
+
+```{r}
+str <- "B = Beans, S = Sugar, S* = Sweetener other than white cane or beet sugar, C = Cocoa Butter, V = Vanilla, L = Lecithin, Sa = Salt"
+
+str <- str %>% 
+  as_tibble() %>% 
+  separate_rows(value, sep = ",") %>% 
+  separate(value, c("key", "value"), "=") %>% 
+  mutate(across(c(key, value), str_squish))
+
+knitr::kable(str)
+```
+
+`str_replace_all` to replace items in list of ingredients with names
+
+```{r}
+df <- df %>% 
+  mutate(ingredients = str_replace_all(ingredients, c("Sa" = "salt",
+                                                      "S\\*" = "non_sugar_sweetener",
+                                                      "B" = "beans",
+                                                      "S" =  "sugar",
+                                                      "V" = "vanilla",
+                                                      "L" = "lecithin",
+                                                      "C" = "cocoa_butter"
+                                                      )))
+
+```
+
+
+```{r}
+library(recipes)
+```
+
+```{r}
+df <- df %>% 
+  separate(ingredients, into = c("ing_1",
+                                 "ing_2",
+                                 "ing_3",
+                                 "ing_4",
+                                 "ing_5",
+                                 "ing_6"),
+           sep = ",") 
+
+
+```
+
+```{r}
+dummy_multi_choice_rec <- recipe(~ ., data = df) %>%
+  step_dummy_multi_choice(starts_with("ing_")) %>%
+  prep()
+
+df <- bake(dummy_multi_choice_rec, new_data = NULL)
+```
+
+
+```{r}
+# df %>% write_rds(here::here("data", "chocolate-bar-ratings-tidy.rds"))
+```
+
